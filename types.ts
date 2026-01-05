@@ -1,3 +1,4 @@
+
 export enum FileType {
   AUDIO = 'AUDIO',
   PDF = 'PDF',
@@ -16,10 +17,10 @@ export interface UploadedFile {
 
 export enum AppStep {
   UPLOAD = 0,
-  RAW_PREVIEW = 1, // New Step: Review raw extracted data
-  TEMPLATE = 2,
-  PROCESSING = 3,
-  RESULT = 4
+  RAW_PREVIEW = 1,
+  // Template step removed
+  PROCESSING = 2,
+  RESULT = 3
 }
 
 export interface ProcessingStatus {
@@ -32,6 +33,14 @@ export interface ProcessingStatus {
 export enum ProcessingMode {
   GENERATE_MARKDOWN = 'GENERATE_MARKDOWN', 
   FILL_TEMPLATE = 'FILL_TEMPLATE'          
+}
+
+export interface Participant {
+  id: string;
+  name: string;
+  gender: 'Ông' | 'Bà' | '';
+  role: string;
+  isAmbiguous: boolean; // True if AI is not sure
 }
 
 // Structure for the Raw Extracted Data (Step 1 output)
@@ -53,4 +62,4 @@ export interface GenerationResult {
   templateKeys?: string[]; 
 }
 
-export const DEFAULT_TEMPLATE = `... (No changes needed here for logic) ...`;
+export const DEFAULT_TEMPLATE = ``; // Not used anymore as we fetch file

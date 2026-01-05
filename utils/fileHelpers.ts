@@ -97,14 +97,34 @@ export const formatFileSize = (bytes: number): string => {
 };
 
 export const extractPlaceholders = (text: string): string[] => {
-  // Updated Regex to capture { key } (single curly braces)
-  // Matches { followed by any character that is not a brace or newline, then }
   const regex = /\{([^{}\n]+)\}/g;
   const matches = new Set<string>();
   let match;
   while ((match = regex.exec(text)) !== null) {
-    // Trim spaces from the extracted key
     matches.add(match[1].trim());
   }
   return Array.from(matches);
+};
+
+// Helper to fetch the hardcoded template
+export const fetchTemplateFromUrl = async (url: string): Promise<{ text: string, file: File }> => {
+  // Using a CORS proxy because fetching http content or cross-origin content directly often fails in browsers
+  const corsProxy = "https://corsproxy.io/?"; 
+  const targetUrl = corsProxy + encodeURIComponent(url);
+
+  try {
+    const response = await fetch(targetUrl);
+    if (!response.ok) throw new Error("Failed to fetch template");
+    const blob = await response.blob();
+    const file = new File([blob], "bienbanhop.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    
+    // Extract text for AI analysis
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    
+    return { text: result.value, file: file };
+  } catch (error) {
+    console.error("Template fetch error:", error);
+    throw new Error("Không thể tải file mẫu từ máy chủ.");
+  }
 };

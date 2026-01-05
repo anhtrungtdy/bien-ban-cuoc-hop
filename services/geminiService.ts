@@ -1,161 +1,120 @@
 import { GoogleGenAI } from "@google/genai";
-import { UploadedFile, FileType, GenerationResult, ProcessingMode, RawMeetingData } from "../types";
+import { UploadedFile, FileType, GenerationResult, ProcessingMode, RawMeetingData, Participant } from "../types";
 
-// 1. RAW EXTRACTION INSTRUCTION
-// Updated to explicitly request Strings, not Arrays/Objects
-const SYSTEM_INSTRUCTION_RAW = `Bạn là chuyên gia phân tích biên bản cuộc họp.
-Nhiệm vụ: Đọc nội dung đầu vào (âm thanh transcript hoặc văn bản) và trích xuất thông tin CỐT LÕI vào định dạng JSON chuẩn.
-
-Định dạng JSON trả về (BẮT BUỘC CÁC VALUE PHẢI LÀ STRING, KHÔNG DÙNG ARRAY HAY NESTED OBJECT):
-{
-  "title": "Chủ đề cuộc họp (String)",
-  "dateTime": "Ngày giờ diễn ra, bao gồm giờ bắt đầu và giờ kết thúc (nếu có) (String)",
-  "location": "Địa điểm/Online (String)",
-  "attendees": "Danh sách người tham dự đầy đủ chức vụ (String). Ví dụ: 1. Ông A - GĐ; 2. Bà B - TP...",
-  "summary": "Tóm tắt ngắn gọn mục đích cuộc họp (String)",
-  "discussions": "Chi tiết các nội dung thảo luận và báo cáo (String). Sử dụng gạch đầu dòng (-) hoặc số thứ tự (1.) để phân tách các ý.",
-  "decisions": "Các quyết định đã được chốt (String). Ví dụ: 1. Thống nhất A; 2. Phê duyệt B...",
-  "actionItems": "Các việc cần làm (String). Ví dụ: 1. Ông A làm việc B (Hạn: 30/10)..."
-}
-
-Lưu ý quan trọng:
-- Value của JSON phải là chuỗi ký tự (String).
-- Nếu có danh sách, hãy dùng ký tự xuống dòng (\\n) và gạch đầu dòng (-) ngay trong chuỗi.
-- KHÔNG trả về mảng JSON [ ... ] hay object lồng nhau { ... }.
-- Nếu không tìm thấy thông tin, để chuỗi rỗng "".
-`;
-
-// 2. MAPPING TO TEMPLATE INSTRUCTION - UPDATED FOR SCIENTIFIC LAYOUT & COLOR STRUCTURE
-const SYSTEM_INSTRUCTION_MAPPING = `Bạn là chuyên gia soạn thảo văn bản hành chính (Form Filler).
-Nhiệm vụ: Lấy dữ liệu từ "Nội dung biên bản thô" để điền vào các "Template Keys".
-
-QUY TẮC XỬ LÝ ĐẶC BIỆT CHO KEY: "noi_dung_cuoc_hop":
-Bạn phải soạn thảo một BIÊN BẢN CUỘC HỌP CHUYÊN NGHIỆP, TRÌNH BÀY KHOA HỌC (SCIENTIFIC LAYOUT).
-
-YÊU CẦU VỀ ĐỊNH DẠNG CHI TIẾT:
-
-1. CÁC PHẦN LỚN (I., II., III., IV.):
-   - BẮT BUỘC viết số La Mã kèm tên phần.
-   - BẮT BUỘC VIẾT HOA TOÀN BỘ (UPPERCASE).
-   - Ví dụ: "I. THÔNG TIN CHUNG", "II. NỘI DUNG CUỘC HỌP".
-
-2. CÁC MỤC NHỎ (1., 2., 3.):
-   - Viết Hoa Chữ Cái Đầu.
-   - Nội dung gãy gọn, rõ ràng.
-
-3. PHẦN "THÀNH PHẦN THAM DỰ" (Rất quan trọng):
-   - Trình bày dạng danh sách liệt kê từng dòng.
-   - Định dạng chuẩn: "• [Ông/Bà] [Họ tên] ([Chức vụ])".
-   - Ví dụ:
-     • Ông Nguyễn Văn A (Giám đốc)
-     • Bà Lê Thị B (Trưởng phòng HCNS)
-   - Nếu có "Vắng mặt", ghi rõ lý do trong ngoặc đơn.
-
-4. KHOẢNG CÁCH DÒNG (SPACING):
-   - Giữa các Phần Lớn (I và II) phải cách nhau 1 dòng trống.
-   - Giữa tiêu đề mục nhỏ và nội dung không cần dòng trống, nhưng giữa các ý lớn nên xuống dòng.
-
-CẤU TRÚC MẪU MONG MUỐN (Output String):
-
-I. THÔNG TIN CHUNG
-• Thời gian: ...
-• Địa điểm: ...
-• Chủ trì: ...
-• Thành phần tham dự:
-• Ông [Tên] ([Chức vụ])
-• Bà [Tên] ([Chức vụ])
-• Thư ký: ...
-
-II. NỘI DUNG CUỘC HỌP
-1. [Tiêu đề mục 1]
-- Nội dung chi tiết thảo luận...
-- Ý kiến đóng góp...
-
-2. [Tiêu đề mục 2]
-- Nội dung báo cáo...
-
-III. QUYẾT NGHỊ CỦA CUỘC HỌP
-Sau khi thảo luận, cuộc họp thống nhất:
-1. Nội dung quyết nghị 1...
-2. Nội dung quyết nghị 2...
-
-IV. DANH SÁCH CÔNG VIỆC (ACTION ITEMS)
-STT  Nội dung công việc    Người thực hiện    Thời hạn
-1    [Công việc A]        [Tên]              [Ngày]
-2    [Công việc B]        [Tên]              [Ngày]
-
-QUY TẮC CHUNG CHO CÁC KEY KHÁC:
-- Ánh xạ thông tin tương ứng từ dữ liệu thô.
-- Tuyệt đối KHÔNG dùng Markdown (**, ##) trong giá trị trả về vì đây là file Word.
-- Trả về JSON phẳng: { "key": "value" }.
-`;
-
-// 3. SMART MERGE INSTRUCTION (Fallback when no keys found)
-const SYSTEM_INSTRUCTION_MERGE = `Bạn là Thư Ký AI chuyên nghiệp.
-Nhiệm vụ: Viết một biên bản cuộc họp hoàn chỉnh (Full Meeting Minutes) dưới dạng Markdown.
-
-Đầu vào:
-1. Dữ liệu chi tiết cuộc họp (JSON).
-2. Cấu trúc/Văn phong mẫu (Template Text).
-
-Yêu cầu xử lý:
-1. **Phân tích Mẫu:** Hiểu cấu trúc, thứ tự các mục, và giọng văn của văn bản mẫu.
-2. **Hợp nhất:** Sử dụng thông tin từ "Dữ liệu chi tiết" để viết lại biên bản sao cho CẤU TRÚC giống hệt Mẫu.
-3. **Thông minh:** Tự động nhận diện phần "Nội dung chính" trong mẫu để thay thế bằng dữ liệu thảo luận thực tế. Giữ nguyên các phần Tiêu đề, Lời mở đầu, Kết thúc của mẫu nếu chúng mang tính thủ tục.
-4. **Định dạng:** Trình bày đẹp, sử dụng Markdown (Bold **, List -, Table).
-`;
-
-// Helper to prevent [object Object] by flattening arrays/objects to strings
-const sanitizeRawData = (data: any): RawMeetingData => {
-  const cleanString = (val: any): string => {
-    if (val === null || val === undefined) return "";
-    if (typeof val === 'string') return val;
-    
-    // If it's an array
-    if (Array.isArray(val)) {
-      return val.map(item => {
-        if (typeof item === 'object' && item !== null) {
-          return `- ${Object.values(item).filter(v => v !== null && v !== undefined && String(v).trim() !== '').join(' - ')}`;
-        }
-        return `- ${String(item)}`;
-      }).join('\n');
-    }
-    
-    // If it's a single object
-    if (typeof val === 'object') {
-       return Object.values(val).filter(v => v !== null && v !== undefined && String(v).trim() !== '').join('\n');
-    }
-    
-    return String(val);
-  };
-
-  return {
-    title: cleanString(data.title),
-    dateTime: cleanString(data.dateTime),
-    location: cleanString(data.location),
-    attendees: cleanString(data.attendees),
-    summary: cleanString(data.summary),
-    discussions: cleanString(data.discussions),
-    decisions: cleanString(data.decisions),
-    actionItems: cleanString(data.actionItems),
-  };
+export const getSystemApiKey = (): string | null => {
+  const envKey = process.env.API_KEY;
+  if (!envKey) return null;
+  const keys = envKey.split(',').map(k => k.trim()).filter(k => k);
+  return keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)] : null;
 };
 
-export const extractRawMeetingData = async (
+// 0. IDENTIFY PARTICIPANTS INSTRUCTION
+const SYSTEM_INSTRUCTION_IDENTIFY = `Bạn là trợ lý phân tích cuộc họp. 
+Nhiệm vụ: Quét nhanh nội dung và liệt kê danh sách những người tham gia/phát biểu.
+Mục tiêu: Giúp người dùng xác định Giới tính (Ông/Bà) và Chức vụ nếu thiếu.
+
+Trả về JSON mảng đối tượng:
+[
+  {
+    "name": "Tên người tham gia",
+    "gender": "Ông" hoặc "Bà" (Nếu không chắc chắn hoặc tên trung tính như 'Thịnh', 'Hòa', 'Tú', hãy để ""),
+    "role": "Chức vụ" (Nếu không có, để ""),
+    "isAmbiguous": true/false (True nếu thiếu chức vụ hoặc không rõ giới tính)
+  }
+]
+Chỉ trả về JSON, không thêm text.
+`;
+
+export const identifyParticipants = async (
   sourceFile: UploadedFile,
   apiKey: string
-): Promise<RawMeetingData> => {
-  if (!apiKey) throw new Error("API Key is missing");
+): Promise<Participant[]> => {
   const ai = new GoogleGenAI({ apiKey });
   const modelName = 'gemini-3-flash-preview'; 
 
   const parts: any[] = [];
   if (sourceFile.type === FileType.TEXT || sourceFile.type === FileType.DOCX) {
-    parts.push({ text: `--- NỘI DUNG CUỘC HỌP ---\n${sourceFile.data}\n--- HẾT ---` });
+    parts.push({ text: `--- SOURCE CONTENT ---\n${sourceFile.data}\n--- END ---` });
   } else {
     parts.push({ inlineData: { mimeType: sourceFile.mimeType, data: sourceFile.data } });
   }
-  parts.push({ text: "Hãy trích xuất thông tin biên bản thô." });
+  parts.push({ text: "Liệt kê danh sách người tham gia dưới dạng JSON." });
+
+  try {
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: { parts },
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION_IDENTIFY,
+        responseMimeType: "application/json",
+        temperature: 0.1,
+      }
+    });
+
+    const jsonText = response.text || "[]";
+    const rawList = JSON.parse(jsonText);
+    
+    return rawList.map((p: any, index: number) => ({
+      id: `p-${index}`,
+      name: p.name || "Người tham gia",
+      gender: p.gender === 'Ông' || p.gender === 'Bà' ? p.gender : '',
+      role: p.role || '',
+      isAmbiguous: p.isAmbiguous || (!p.role || !p.gender)
+    }));
+
+  } catch (e) {
+    console.error("Error identifying participants", e);
+    return []; // Return empty if failed, user can add manually
+  }
+};
+
+// 1. RAW EXTRACTION INSTRUCTION
+const SYSTEM_INSTRUCTION_RAW = `Bạn là chuyên gia ghi chép biên bản cuộc họp (Stenographer/Analyst).
+Nhiệm vụ: Đọc nội dung đầu vào (âm thanh transcript hoặc văn bản) và trích xuất TOÀN BỘ thông tin quan trọng vào định dạng JSON.
+
+MỤC TIÊU: 
+1. KHÔNG BỎ SÓT CHI TIẾT (số liệu, ngày tháng, quyết định).
+2. XÁC ĐỊNH ĐÚNG DANH TÍNH NGƯỜI NÓI dựa trên "Context người dùng cung cấp".
+
+Định dạng JSON trả về (BẮT BUỘC VALUE LÀ STRING):
+{
+  "title": "Chủ đề chính xác của cuộc họp (String)",
+  "dateTime": "Ngày giờ diễn ra chi tiết (String)",
+  "location": "Địa điểm cụ thể (String)",
+  "attendees": "Danh sách chi tiết: • [Ông/Bà] [Tên] ([Chức vụ]). (String)",
+  "summary": "Mục đích và bối cảnh chung của cuộc họp (String)",
+  "discussions": "CHI TIẾT DIỄN BIẾN: Trình bày theo dòng thời gian hoặc theo vấn đề. Ghi rõ: Ai phát biểu? Nội dung là gì? Tranh luận ra sao? (String). Dùng gạch đầu dòng (-) để phân tách.",
+  "decisions": "TẤT CẢ các kết luận, phê duyệt, hoặc sự đồng thuận cuối cùng của chủ tọa/lãnh đạo (String).",
+  "actionItems": "Việc cần làm: Ai làm? Làm gì? Hạn chót? (String)"
+}
+
+Lưu ý:
+- Value của JSON phải là chuỗi ký tự (String).
+- Dùng \\n để xuống dòng trong chuỗi.
+- BẮT BUỘC TUÂN THỦ Giới tính/Chức vụ trong phần USER CONTEXT.
+`;
+
+export const extractRawMeetingData = async (
+  sourceFile: UploadedFile,
+  userContext: string,
+  apiKey: string
+): Promise<RawMeetingData> => {
+  const ai = new GoogleGenAI({ apiKey });
+  const modelName = 'gemini-3-flash-preview'; 
+
+  const parts: any[] = [];
+  
+  // Add User Context prominently
+  if (userContext && userContext.trim() !== "") {
+    parts.push({ text: `=== DANH SÁCH THÀNH PHẦN THAM DỰ CHÍNH XÁC (USER VERIFIED) ===\n${userContext}\n(Hãy dùng thông tin trên để xác định đúng tên, giới tính và chức vụ người tham gia)\n================================================` });
+  }
+
+  if (sourceFile.type === FileType.TEXT || sourceFile.type === FileType.DOCX) {
+    parts.push({ text: `--- NỘI DUNG CUỘC HỌP (SOURCE CONTENT) ---\n${sourceFile.data}\n--- HẾT NỘI DUNG ---` });
+  } else {
+    parts.push({ inlineData: { mimeType: sourceFile.mimeType, data: sourceFile.data } });
+  }
+  parts.push({ text: "Hãy trích xuất thông tin biên bản thô một cách chi tiết nhất dựa trên nội dung và danh sách thành phần đã xác thực." });
 
   const response = await ai.models.generateContent({
     model: modelName,
@@ -163,7 +122,7 @@ export const extractRawMeetingData = async (
     config: {
       systemInstruction: SYSTEM_INSTRUCTION_RAW,
       responseMimeType: "application/json",
-      temperature: 0.2,
+      temperature: 0.2, // Low temperature for factual extraction
     }
   });
 
@@ -186,37 +145,84 @@ export const extractRawMeetingData = async (
   }
 };
 
+// 2. MAPPING TO TEMPLATE INSTRUCTION
+const SYSTEM_INSTRUCTION_MAPPING = `Bạn là "AI Thư Ký Tổng Hợp Cao Cấp".
+Nhiệm vụ của bạn là điền thông tin vào File Word mẫu dựa trên Dữ liệu thô.
+
+QUY TRÌNH TƯ DUY (Thinking Process):
+1. **Đọc Key trong Template**: Hiểu ý nghĩa ngữ nghĩa của key đó (Ví dụ: "{y_kien_chi_dao}" nghĩa là cần tìm lời nói của người lãnh đạo cao nhất trong phần thảo luận hoặc kết luận).
+2. **Quét Toàn Bộ Dữ Liệu**: KHÔNG chỉ nhìn vào một trường tương ứng. Hãy tìm thông tin từ "discussions", "decisions", "summary", và "actionItems" để tổng hợp câu trả lời tốt nhất cho Key đó.
+3. **Tối ưu hóa văn phong**: Viết lại nội dung cho trôi chảy, chuyên nghiệp, văn phong hành chính nghiêm túc.
+
+QUY TẮC XỬ LÝ ĐẶC BIỆT CHO KEY: "noi_dung_cuoc_hop":
+Đây là phần cốt lõi. Bạn phải TỔNG HỢP lại toàn bộ diễn biến cuộc họp thành một báo cáo khoa học.
+
+YÊU CẦU ĐỊNH DẠNG "SCIENTIFIC LAYOUT" (BẮT BUỘC):
+1. Chia các phần lớn bằng số La Mã (I., II., III.) và VIẾT HOA TOÀN BỘ TIÊU ĐỀ (UPPERCASE).
+   - Ví dụ: "I. THÔNG TIN CHUNG", "II. DIỄN BIẾN CUỘC HỌP", "III. KẾT LUẬN".
+2. Các mục nhỏ dùng số (1., 2.) in đậm tiêu đề.
+3. Giữa các phần lớn (I, II) phải có 1 dòng trống (\n\n) để tạo độ thoáng.
+4. Phần "Thành phần tham dự": Trình bày dạng danh sách dọc: "• Tên (Chức vụ)".
+
+CẤU TRÚC MẪU CHO "noi_dung_cuoc_hop":
+I. THÔNG TIN CHUNG
+• Thời gian: ...
+• Địa điểm: ...
+• Thành phần:
+• Ông A (Giám đốc)
+• Bà B (Nhân viên)
+
+II. NỘI DUNG LÀM VIỆC
+1. Báo cáo của bộ phận chuyên môn
+- Nội dung chi tiết...
+
+2. Thảo luận và đóng góp ý kiến
+- Ông X có ý kiến: ...
+- Bà Y bổ sung: ...
+
+III. KẾT LUẬN VÀ CHỈ ĐẠO
+Cuộc họp thống nhất các nội dung sau:
+1. Thống nhất phương án...
+2. Giao nhiệm vụ...
+
+IV. PHÂN CÔNG THỰC HIỆN
+(Liệt kê các đầu việc, người phụ trách và hạn chót dưới dạng danh sách rõ ràng)
+
+Lưu ý cuối cùng:
+- Trả về JSON phẳng: { "key": "value" }.
+- Value là chuỗi text đã được định dạng (có xuống dòng \\n).
+`;
+
 export const mapContentToTemplate = async (
   rawData: RawMeetingData,
   templateKeys: string[],
   apiKey: string
 ): Promise<GenerationResult> => {
-  if (!apiKey) throw new Error("API Key is missing");
   const ai = new GoogleGenAI({ apiKey });
   const modelName = 'gemini-3-flash-preview'; 
 
   const contextString = `
-  --- DỮ LIỆU BIÊN BẢN THÔ ---
+  --- DỮ LIỆU BIÊN BẢN THÔ (NGUỒN) ---
   CHỦ ĐỀ: ${rawData.title}
   THỜI GIAN: ${rawData.dateTime}
   ĐỊA ĐIỂM: ${rawData.location}
   THÀNH PHẦN: ${rawData.attendees}
   TÓM TẮT: ${rawData.summary}
-  NỘI DUNG THẢO LUẬN: ${rawData.discussions}
-  QUYẾT ĐỊNH: ${rawData.decisions}
+  NỘI DUNG THẢO LUẬN CHI TIẾT: ${rawData.discussions}
+  QUYẾT ĐỊNH & KẾT LUẬN: ${rawData.decisions}
   HÀNH ĐỘNG TIẾP THEO: ${rawData.actionItems}
   -----------------------------
   `;
 
   const keysList = templateKeys.map(k => `"${k}"`).join(", ");
   const prompt = `
-  Danh sách các KEYS trong File Word (Placeholders):
+  Danh sách các KEYS (Placeholders) cần điền vào File Word:
   [${keysList}]
   
   Yêu cầu:
-  1. Nếu danh sách keys có "noi_dung_cuoc_hop", hãy thực hiện "QUY TẮC XỬ LÝ ĐẶC BIỆT" để tạo ra biên bản hoàn chỉnh. 
-     Chú ý: Định dạng Thành phần tham dự phải là "• Tên (Chức vụ)".
-  2. Với các key khác (nếu có), hãy điền thông tin tương ứng.
+  1. Với mỗi Key, hãy tìm thông tin phù hợp nhất từ "DỮ LIỆU BIÊN BẢN THÔ".
+  2. Nếu key là "noi_dung_cuoc_hop", hãy thực hiện quy tắc "SCIENTIFIC LAYOUT" đã hướng dẫn.
+  3. Nếu key yêu cầu thông tin cụ thể (ví dụ: "chu_to_a_ket_luan"), hãy tìm trong phần Decisions hoặc Discussions xem chủ tọa nói gì.
   `;
 
   const response = await ai.models.generateContent({
@@ -225,7 +231,7 @@ export const mapContentToTemplate = async (
     config: {
       systemInstruction: SYSTEM_INSTRUCTION_MAPPING,
       responseMimeType: "application/json",
-      temperature: 0.1,
+      temperature: 0.3,
     }
   });
 
@@ -260,12 +266,26 @@ export const mapContentToTemplate = async (
   };
 };
 
+// 3. SMART MERGE INSTRUCTION (Fallback)
+const SYSTEM_INSTRUCTION_MERGE = `Bạn là Thư Ký AI chuyên nghiệp.
+Nhiệm vụ: Viết một biên bản cuộc họp hoàn chỉnh (Full Meeting Minutes) dưới dạng Markdown.
+
+Đầu vào:
+1. Dữ liệu chi tiết cuộc họp (JSON).
+2. Cấu trúc/Văn phong mẫu (Template Text).
+
+Yêu cầu xử lý:
+1. **Phân tích Mẫu:** Hiểu cấu trúc, thứ tự các mục, và giọng văn của văn bản mẫu.
+2. **Hợp nhất:** Sử dụng thông tin từ "Dữ liệu chi tiết" để viết lại biên bản sao cho CẤU TRÚC giống hệt Mẫu.
+3. **Thông minh:** Tự động nhận diện phần "Nội dung chính" trong mẫu để thay thế bằng dữ liệu thảo luận thực tế. Giữ nguyên các phần Tiêu đề, Lời mở đầu, Kết thúc của mẫu nếu chúng mang tính thủ tục.
+4. **Định dạng:** Trình bày đẹp, sử dụng Markdown (Bold **, List -, Table).
+`;
+
 export const generateFinalMinutes = async (
     rawData: RawMeetingData,
     templateText: string,
     apiKey: string
 ): Promise<GenerationResult> => {
-    if (!apiKey) throw new Error("API Key is missing");
     const ai = new GoogleGenAI({ apiKey });
     const modelName = 'gemini-3-flash-preview';
   
@@ -303,6 +323,42 @@ export const generateFinalMinutes = async (
       mode: ProcessingMode.GENERATE_MARKDOWN,
       markdown: response.text || "Không thể tạo nội dung."
     };
+};
+
+// Helper to prevent [object Object] by flattening arrays/objects to strings
+const sanitizeRawData = (data: any): RawMeetingData => {
+  const cleanString = (val: any): string => {
+    if (val === null || val === undefined) return "";
+    if (typeof val === 'string') return val;
+    
+    // If it's an array
+    if (Array.isArray(val)) {
+      return val.map(item => {
+        if (typeof item === 'object' && item !== null) {
+          return `- ${Object.values(item).filter(v => v !== null && v !== undefined && String(v).trim() !== '').join(' - ')}`;
+        }
+        return `- ${String(item)}`;
+      }).join('\n');
+    }
+    
+    // If it's a single object
+    if (typeof val === 'object') {
+       return Object.values(val).filter(v => v !== null && v !== undefined && String(v).trim() !== '').join('\n');
+    }
+    
+    return String(val);
+  };
+
+  return {
+    title: cleanString(data.title),
+    dateTime: cleanString(data.dateTime),
+    location: cleanString(data.location),
+    attendees: cleanString(data.attendees),
+    summary: cleanString(data.summary),
+    discussions: cleanString(data.discussions),
+    decisions: cleanString(data.decisions),
+    actionItems: cleanString(data.actionItems),
+  };
 };
 
 export const generateMinutes = async (
