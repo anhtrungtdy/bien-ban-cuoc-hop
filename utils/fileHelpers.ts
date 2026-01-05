@@ -65,20 +65,17 @@ export const processUploadedFile = async (file: File): Promise<UploadedFile> => 
   if (type === FileType.TEXT) {
     data = await readFileAsText(file);
   } else if (type === FileType.DOCX) {
-    // Convert DOCX to Raw Text because Gemini API doesn't support DOCX inlineData directly
     try {
       const arrayBuffer = await readFileAsArrayBuffer(file);
       const result = await mammoth.extractRawText({ arrayBuffer });
       data = result.value;
-      // We treat the processed DOCX as TEXT for the AI
-      finalType = FileType.TEXT; 
-      mimeType = 'text/plain';
+      finalType = FileType.DOCX; 
+      mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     } catch (error) {
       console.error("Error parsing DOCX:", error);
       throw new Error("Không thể đọc file DOCX. Vui lòng thử lại hoặc chuyển sang PDF.");
     }
   } else {
-    // Audio, PDF
     data = await readFileAsBase64(file);
   }
 
@@ -86,7 +83,7 @@ export const processUploadedFile = async (file: File): Promise<UploadedFile> => 
     name: file.name,
     type: finalType,
     mimeType: mimeType,
-    data,
+    data, 
     size: file.size
   };
 };
@@ -97,4 +94,17 @@ export const formatFileSize = (bytes: number): string => {
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
+
+export const extractPlaceholders = (text: string): string[] => {
+  // Updated Regex to capture { key } (single curly braces)
+  // Matches { followed by any character that is not a brace or newline, then }
+  const regex = /\{([^{}\n]+)\}/g;
+  const matches = new Set<string>();
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    // Trim spaces from the extracted key
+    matches.add(match[1].trim());
+  }
+  return Array.from(matches);
 };

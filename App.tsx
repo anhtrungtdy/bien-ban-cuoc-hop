@@ -1,99 +1,165 @@
 import React, { useState, useEffect } from 'react';
 import { Steps } from './components/Steps';
+import { UploadedFile, AppStep, ProcessingStatus, DEFAULT_TEMPLATE, GenerationResult, ProcessingMode, RawMeetingData } from './types';
 import { UploadSection } from './components/UploadSection';
 import { TemplateSection } from './components/TemplateSection';
 import { ProcessingSection } from './components/ProcessingSection';
 import { ResultSection } from './components/ResultSection';
+import { RawPreviewSection } from './components/RawPreviewSection'; // New Import
 import { ApiKeyModal } from './components/ApiKeyModal';
-import { AppStep, UploadedFile, DEFAULT_TEMPLATE, ProcessingStatus } from './types';
-import { generateMinutes } from './services/geminiService';
+import { extractRawMeetingData, mapContentToTemplate, generateFinalMinutes } from './services/geminiService'; // Updated Imports
+import { extractPlaceholders } from './utils/fileHelpers';
 import { Bot, Info } from 'lucide-react';
 
 function App() {
-  const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.UPLOAD);
+  const [currentStep, setCurrentStep] = useState<AppStep>(() => {
+    const saved = localStorage.getItem('mm_currentStep');
+    return saved ? parseInt(saved) : AppStep.UPLOAD;
+  });
+
+  const [result, setResult] = useState<GenerationResult | null>(null);
   const [file, setFile] = useState<UploadedFile | null>(null);
-  
-  // Initialize string template from localStorage
+  const [rawMeetingData, setRawMeetingData] = useState<RawMeetingData | null>(null); // State for Raw Data
+
   const [template, setTemplate] = useState<string>(() => {
     return localStorage.getItem('minuteMaster_template') || DEFAULT_TEMPLATE;
   });
 
-  // New state for binary template file (PDF/DOCX)
-  // We do NOT save binary files to localStorage to avoid quota limits
   const [templateFile, setTemplateFile] = useState<UploadedFile | null>(null);
+  const [templateFileRaw, setTemplateFileRaw] = useState<File | null>(null);
 
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatus>({
     isProcessing: false,
     message: '',
     progress: 0
   });
-  const [result, setResult] = useState<string>('');
+  
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
 
-  // Save string template to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('mm_currentStep', currentStep.toString());
+  }, [currentStep]);
+
   useEffect(() => {
     localStorage.setItem('minuteMaster_template', template);
   }, [template]);
 
-  const handleFileSelected = (selectedFile: UploadedFile) => {
-    setFile(selectedFile);
-    setCurrentStep(AppStep.TEMPLATE);
-  };
-
   const getApiKey = () => {
     const envKey = process.env.API_KEY;
     if (!envKey) return null;
-    
-    // Support multiple keys separated by comma for load balancing/rotation
     const keys = envKey.split(',').map(k => k.trim()).filter(k => k);
-    if (keys.length === 0) return null;
-    
-    // Pick a random key from the pool
-    return keys[Math.floor(Math.random() * keys.length)];
+    return keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)] : null;
   };
 
-  const handleStartProcessing = async () => {
-    if (!file) return;
+  // Step 1: Handle File Upload -> Go to Raw Extraction
+  const handleFileSelected = async (selectedFile: UploadedFile) => {
+    setFile(selectedFile);
+    await startRawExtraction(selectedFile);
+  };
+
+  // Step 1.5: Raw Extraction Logic
+  const startRawExtraction = async (selectedFile: UploadedFile) => {
+    setCurrentStep(AppStep.PROCESSING);
+    setProcessingStatus({ isProcessing: true, message: 'Đang chuyển đổi nội dung sang dữ liệu thô...', progress: 20 });
+
+    try {
+        const apiKey = getApiKey();
+        if (!apiKey) throw new Error("MISSING_API_KEY");
+
+        const data = await extractRawMeetingData(selectedFile, apiKey);
+        setRawMeetingData(data);
+        
+        setProcessingStatus({ isProcessing: false, message: 'Hoàn tất', progress: 100 });
+        setCurrentStep(AppStep.RAW_PREVIEW);
+
+    } catch (error: any) {
+        handleError(error);
+    }
+  };
+
+  // Step 2: Confirm Raw Data -> Go to Template
+  const handleConfirmRawData = () => {
+    setCurrentStep(AppStep.TEMPLATE);
+  };
+
+  // Step 3: Handle Final Processing (Smart Mapping)
+  const handleStartMapping = async () => {
+    if (!rawMeetingData) return;
 
     setCurrentStep(AppStep.PROCESSING);
-    setProcessingStatus({ isProcessing: true, message: 'Đang phân tích cấu trúc...', progress: 5 });
+    setProcessingStatus({ isProcessing: true, message: 'Đang phân tích cấu trúc Template...', progress: 30 });
 
     try {
       const apiKey = getApiKey(); 
-      if (!apiKey) {
-        throw new Error("MISSING_API_KEY");
+      if (!apiKey) throw new Error("MISSING_API_KEY");
+
+      // Strategy:
+      // 1. Try to find explicit placeholders {key}
+      // 2. If found -> Use strict "Fill Template" mode (Preserves Word layout exactly)
+      // 3. If NOT found -> Use smart "Generate" mode (AI mimics structure)
+      
+      let keys: string[] = [];
+      let templateContentText = template;
+
+      if (templateFile && templateFile.data) {
+        keys = extractPlaceholders(templateFile.data); // .data is Raw Text for DOCX extraction
+        templateContentText = templateFile.data;
+      } else if (!templateFile) {
+        keys = extractPlaceholders(template);
       }
 
-      // Start the generation, passing both string template and potential file template
-      const minutes = await generateMinutes(file, template, templateFile, apiKey);
+      if (keys.length > 0) {
+        // --- STRICT MODE (Preserve Layout) ---
+        setProcessingStatus({ 
+            isProcessing: true, 
+            message: `Đã tìm thấy ${keys.length} vị trí điền. Đang xử lý chế độ Chính xác...`, 
+            progress: 60 
+        });
+        const genResult = await mapContentToTemplate(rawMeetingData, keys, apiKey);
+        setResult(genResult);
+
+      } else {
+        // --- SMART FALLBACK MODE (AI Mimic) ---
+        setProcessingStatus({ 
+            isProcessing: true, 
+            message: `Không tìm thấy từ khóa {...}. Đang chuyển sang chế độ Tự động viết biên bản theo mẫu...`, 
+            progress: 60 
+        });
+
+        // Use AI to generate a full markdown document using the template text as a style guide
+        const genResult = await generateFinalMinutes(rawMeetingData, templateContentText, apiKey);
+        setResult(genResult);
+      }
       
-      setResult(minutes);
       setProcessingStatus({ isProcessing: false, message: 'Hoàn tất!', progress: 100 });
       setCurrentStep(AppStep.RESULT);
 
     } catch (error: any) {
-      console.error(error);
-      
-      let errorMsg = error.message || "Không thể xử lý yêu cầu.";
-      
-      if (errorMsg === "MISSING_API_KEY") {
-        setShowApiKeyModal(true);
-        errorMsg = "Thiếu API Key. Vui lòng kiểm tra hướng dẫn cấu hình.";
-      }
-
-      setProcessingStatus({
-        isProcessing: false,
-        message: 'Lỗi',
-        progress: 0,
-        error: errorMsg
-      });
+      handleError(error);
     }
+  };
+
+  const handleError = (error: any) => {
+    console.error(error);
+    let errorMsg = error.message || "Lỗi không xác định.";
+    if (errorMsg === "MISSING_API_KEY") {
+        setShowApiKeyModal(true);
+        errorMsg = "Thiếu API Key.";
+    }
+    setProcessingStatus({ isProcessing: false, message: 'Lỗi', progress: 0, error: errorMsg });
+  };
+
+  const handleStepClick = (step: AppStep) => {
+    if (step > currentStep) return; // Prevent jumping forward
+    setCurrentStep(step);
   };
 
   const handleReset = () => {
     setFile(null);
-    setResult('');
-    setTemplateFile(null); // Reset template file choice
+    setResult(null);
+    setRawMeetingData(null);
+    setTemplateFile(null); 
+    setTemplateFileRaw(null);
     setProcessingStatus({ isProcessing: false, message: '', progress: 0 });
     setCurrentStep(AppStep.UPLOAD);
   };
@@ -101,11 +167,9 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900">
       <ApiKeyModal isOpen={showApiKeyModal} onClose={() => setShowApiKeyModal(false)} />
-
-      {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => window.location.reload()}>
             <div className="bg-indigo-600 p-2 rounded-lg">
               <Bot className="text-white w-6 h-6" />
             </div>
@@ -113,66 +177,53 @@ function App() {
               MinuteMaster AI
             </h1>
           </div>
-          <div className="flex items-center space-x-4">
-             <div className="hidden md:flex items-center text-xs text-slate-400 bg-slate-100 px-3 py-1 rounded-full">
-                <Info size={12} className="mr-1" />
-                <span>Hosting Ready</span>
-             </div>
-             <div className="text-sm text-slate-500 hidden sm:block">
-              Trợ lý họp thông minh
-             </div>
+          <div className="hidden md:flex items-center text-xs text-slate-400 bg-slate-100 px-3 py-1 rounded-full">
+            <Info size={12} className="mr-1" /> Enterprise Edition
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="flex-grow px-4 sm:px-6 lg:px-8 py-8">
         <div className="max-w-6xl mx-auto">
-          {/* Progress Steps */}
-          <div className="mb-8">
-            <Steps currentStep={currentStep} />
-          </div>
-
-          {/* Dynamic Content based on Step */}
+          <div className="mb-8"><Steps currentStep={currentStep} onStepClick={handleStepClick} /></div>
           <div className="transition-all duration-500 ease-in-out">
-            {currentStep === AppStep.UPLOAD && (
-              <UploadSection onFileSelected={handleFileSelected} />
+            {currentStep === AppStep.UPLOAD && <UploadSection onFileSelected={handleFileSelected} />}
+            
+            {currentStep === AppStep.RAW_PREVIEW && rawMeetingData && (
+                <RawPreviewSection 
+                    data={rawMeetingData} 
+                    onUpdateData={setRawMeetingData} 
+                    onNext={handleConfirmRawData} 
+                />
             )}
 
-            {currentStep === AppStep.TEMPLATE && file && (
+            {currentStep === AppStep.TEMPLATE && (
               <TemplateSection 
-                uploadedFile={file}
+                uploadedFile={file || { name: 'File đã tải', type: 'UNKNOWN', size: 0, data: '', mimeType: '' } as any}
                 template={template}
                 templateFile={templateFile}
                 setTemplate={setTemplate}
                 setTemplateFile={setTemplateFile}
-                onNext={handleStartProcessing}
-                onBack={() => setCurrentStep(AppStep.UPLOAD)}
+                setTemplateFileRaw={setTemplateFileRaw}
+                onNext={handleStartMapping}
+                onBack={() => setCurrentStep(AppStep.RAW_PREVIEW)}
               />
             )}
-
-            {currentStep === AppStep.PROCESSING && (
-              <ProcessingSection 
-                status={processingStatus} 
-                onRetry={handleStartProcessing}
-              />
-            )}
-
-            {currentStep === AppStep.RESULT && (
+            
+            {currentStep === AppStep.PROCESSING && <ProcessingSection status={processingStatus} onRetry={() => setCurrentStep(AppStep.UPLOAD)} />}
+            
+            {currentStep === AppStep.RESULT && result && (
               <ResultSection 
-                content={result} 
-                onReset={handleReset}
+                result={result} 
+                templateFileRaw={templateFileRaw}
+                onReset={handleReset} 
               />
             )}
           </div>
         </div>
       </main>
-
-      {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-6 mt-auto">
-        <div className="max-w-6xl mx-auto px-4 text-center text-slate-400 text-sm">
-          <p>© {new Date().getFullYear()} MinuteMaster AI. Powered by Google Gemini 2.5 Flash.</p>
-        </div>
+        <div className="max-w-6xl mx-auto px-4 text-center text-slate-400 text-sm">© {new Date().getFullYear()} MinuteMaster AI.</div>
       </footer>
     </div>
   );

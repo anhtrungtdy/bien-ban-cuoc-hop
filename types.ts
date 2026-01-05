@@ -16,9 +16,10 @@ export interface UploadedFile {
 
 export enum AppStep {
   UPLOAD = 0,
-  TEMPLATE = 1,
-  PROCESSING = 2,
-  RESULT = 3
+  RAW_PREVIEW = 1, // New Step: Review raw extracted data
+  TEMPLATE = 2,
+  PROCESSING = 3,
+  RESULT = 4
 }
 
 export interface ProcessingStatus {
@@ -28,32 +29,28 @@ export interface ProcessingStatus {
   error?: string;
 }
 
-export const DEFAULT_TEMPLATE = `
-# BIÊN BẢN CUỘC HỌP (MEETING MINUTES)
+export enum ProcessingMode {
+  GENERATE_MARKDOWN = 'GENERATE_MARKDOWN', 
+  FILL_TEMPLATE = 'FILL_TEMPLATE'          
+}
 
-**Chủ đề:** [Tự động trích xuất]
-**Thời gian:** [Tự động trích xuất]
-**Thành phần tham dự:** [Danh sách người tham gia]
+// Structure for the Raw Extracted Data (Step 1 output)
+export interface RawMeetingData {
+  title: string;
+  dateTime: string;
+  location: string;
+  attendees: string; // List of names
+  summary: string; // Executive summary
+  discussions: string; // Detailed points
+  decisions: string; // Key decisions made
+  actionItems: string; // To-do list
+}
 
----
+export interface GenerationResult {
+  mode: ProcessingMode;
+  markdown?: string;       
+  jsonData?: Record<string, any>; 
+  templateKeys?: string[]; 
+}
 
-## 1. Nội dung chính (Key Discussion Points)
-- [Điểm chính 1]
-- [Điểm chính 2]
-- [Chi tiết thảo luận...]
-
-## 2. Các quyết định đã được thông qua (Decisions Made)
-- [Quyết định 1]
-- [Quyết định 2]
-
-## 3. Kế hoạch hành động (Action Items)
-| Nhiệm vụ | Người phụ trách | Thời hạn |
-| :--- | :--- | :--- |
-| [Mô tả nhiệm vụ] | [Tên] | [Ngày/Tháng] |
-| [Mô tả nhiệm vụ] | [Tên] | [Ngày/Tháng] |
-
----
-
-**Ghi chú bổ sung:**
-[Các thông tin khác nếu có]
-`;
+export const DEFAULT_TEMPLATE = `... (No changes needed here for logic) ...`;
