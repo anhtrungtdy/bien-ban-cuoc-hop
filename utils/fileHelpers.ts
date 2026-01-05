@@ -1,16 +1,24 @@
 import { FileType, UploadedFile } from '../types';
 
 export const getFileType = (file: File): FileType => {
-  if (file.type.startsWith('audio/') || file.name.endsWith('.mp3') || file.name.endsWith('.m4a') || file.name.endsWith('.wav')) {
+  const name = file.name.toLowerCase();
+  const type = file.type;
+
+  if (type.startsWith('audio/') || name.endsWith('.mp3') || name.endsWith('.m4a') || name.endsWith('.wav')) {
     return FileType.AUDIO;
   }
-  if (file.type === 'application/pdf') {
+  if (type === 'application/pdf' || name.endsWith('.pdf')) {
     return FileType.PDF;
   }
-  if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.name.endsWith('.docx')) {
+  if (
+    type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
+    type === 'application/msword' ||
+    name.endsWith('.docx') || 
+    name.endsWith('.doc')
+  ) {
     return FileType.DOCX;
   }
-  if (file.type === 'text/plain' || file.name.endsWith('.txt') || file.name.endsWith('.md')) {
+  if (type === 'text/plain' || name.endsWith('.txt') || name.endsWith('.md')) {
     return FileType.TEXT;
   }
   return FileType.UNKNOWN;
@@ -22,6 +30,7 @@ export const readFileAsBase64 = (file: File): Promise<string> => {
     reader.onload = () => {
       const result = reader.result as string;
       // Remove Data URI prefix (e.g., "data:audio/mp3;base64,")
+      // Some browsers/files might have different headers, split by comma is safest
       const base64 = result.split(',')[1];
       resolve(base64);
     };
@@ -43,6 +52,8 @@ export const processUploadedFile = async (file: File): Promise<UploadedFile> => 
   const type = getFileType(file);
   let data = '';
 
+  // Only read as text if it is explicitly a text file type. 
+  // PDFs and DOCX should always be Base64 for Gemini.
   if (type === FileType.TEXT) {
     data = await readFileAsText(file);
   } else {

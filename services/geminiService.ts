@@ -1,59 +1,68 @@
 import { GoogleGenAI } from "@google/genai";
 import { UploadedFile, FileType } from "../types";
 
-const SYSTEM_INSTRUCTION = `Bạn là một thư ký chuyên nghiệp, xuất sắc trong việc tổng hợp nội dung cuộc họp từ các tài liệu lớn.
+const SYSTEM_INSTRUCTION = `Bạn là một thư ký chuyên nghiệp. Nhiệm vụ của bạn là tạo biên bản cuộc họp dựa trên dữ liệu đầu vào.
 
-Nhiệm vụ cốt lõi:
-1.  **Phân tích toàn diện:** Đọc/Nghe toàn bộ nội dung đầu vào (dù là file ghi âm dài hàng giờ hay tài liệu dày). Không bỏ sót các chi tiết ở phần cuối.
-2.  **Trích xuất thông tin:** Xác định Chủ đề, Thời gian, Thành phần tham dự, Nội dung thảo luận chính, Các tranh luận (nếu có), Kết luận cuối cùng, và Action Items (Ai làm gì, bao giờ xong).
-3.  **Tuân thủ Template:** Trình bày kết quả CHÍNH XÁC theo cấu trúc Markdown mà người dùng cung cấp.
-4.  **Xử lý ngôn ngữ:** Nếu file nguồn là tiếng nước ngoài, hãy dịch sang Tiếng Việt (trừ khi template yêu cầu khác).
-5.  **Chất lượng:** Văn phong trang trọng, khách quan, rõ ràng.
+QUAN TRỌNG NHẤT VỀ ĐỊNH DẠNG:
+1.  Nếu người dùng cung cấp một FILE MẪU (Template File), bạn phải **nhìn vào cấu trúc hình ảnh/văn bản** của file đó và tạo ra kết quả có bố cục (layout) tương tự nhất có thể bằng Markdown.
+2.  Hãy chú ý đến các tiêu đề, các bảng biểu (số cột, tên cột), các gạch đầu dòng và cách trình bày của file mẫu.
+3.  Kết quả trả về phải là định dạng Markdown.
 
-Quy tắc xử lý file lớn:
-- Với file ghi âm dài, hãy chú ý đến sự thay đổi người nói và các chuyển đoạn chủ đề.
-- Nếu thông tin bị thiếu trong file nguồn, hãy ghi chú rõ ràng là "[Không có trong tài liệu]", tuyệt đối không bịa đặt.
+QUY TRÌNH XỬ LÝ:
+1.  Đọc/Nghe nội dung từ FILE NGUỒN (Source) để lấy thông tin.
+2.  Nhìn vào FILE MẪU (Template) để lấy cấu trúc.
+3.  Điền thông tin từ (1) vào cấu trúc của (2).
+4.  Nếu file nguồn thiếu thông tin cho một mục nào đó trong mẫu, hãy để trống hoặc ghi "N/A", không được tự bịa ra thông tin.
+5.  Sử dụng ngôn ngữ Tiếng Việt (trừ khi file mẫu yêu cầu tiếng Anh).
 `;
 
 export const generateMinutes = async (
-  file: UploadedFile,
-  template: string,
+  sourceFile: UploadedFile,
+  textTemplate: string,
+  templateFile: UploadedFile | null,
   apiKey: string
 ): Promise<string> => {
   if (!apiKey) throw new Error("API Key is missing");
 
   const ai = new GoogleGenAI({ apiKey });
-
-  // Gemini 2.5 Flash has a large context window (1M tokens), perfect for long audio/docs.
   const modelName = 'gemini-2.5-flash-latest';
 
   try {
     const parts: any[] = [];
 
-    // Add the source material
-    if (file.type === FileType.TEXT) {
+    // --- PART 1: SOURCE CONTENT ---
+    if (sourceFile.type === FileType.TEXT) {
       parts.push({
-        text: `--- NỘI DUNG TÀI LIỆU NGUỒN ---\n\n${file.data}\n\n--- HẾT NỘI DUNG ---`
+        text: `--- DỮ LIỆU NGUỒN CẦN XỬ LÝ (Source Content) ---\n\n${sourceFile.data}\n\n--- HẾT DỮ LIỆU NGUỒN ---`
       });
     } else {
-      // Audio, PDF, DOCX
       parts.push({
         inlineData: {
-          mimeType: file.mimeType,
-          data: file.data
+          mimeType: sourceFile.mimeType,
+          data: sourceFile.data
         }
       });
+      parts.push({ text: "Đây là dữ liệu nội dung cuộc họp (file ghi âm hoặc tài liệu gốc)." });
     }
 
-    // Add the template requirement
-    parts.push({
-      text: `\n\nNHIỆM VỤ: Hãy đóng vai trò thư ký, phân tích toàn bộ dữ liệu ở trên và viết biên bản cuộc họp chi tiết.
-      
-      YÊU CẦU BẮT BUỘC VỀ ĐỊNH DẠNG (TEMPLATE):
-      ${template}
-      
-      Hãy bắt đầu viết biên bản ngay bây giờ:`
-    });
+    // --- PART 2: TEMPLATE ---
+    if (templateFile) {
+      // If user uploaded a binary template (PDF/DOCX)
+      parts.push({
+        inlineData: {
+          mimeType: templateFile.mimeType,
+          data: templateFile.data
+        }
+      });
+      parts.push({ 
+        text: "Đây là FILE MẪU (Template). Hãy phân tích cấu trúc, bảng biểu và cách trình bày của file này. Tạo ra biên bản cuộc họp có nội dung lấy từ dữ liệu nguồn, nhưng hình thức trình bày (Markdown) phải KHỚP với file mẫu này." 
+      });
+    } else {
+      // Use text template
+      parts.push({
+        text: `\n\nYÊU CẦU VỀ ĐỊNH DẠNG (Text Template):\n${textTemplate}\n\nHãy điền thông tin vào mẫu trên.`
+      });
+    }
 
     const response = await ai.models.generateContent({
       model: modelName,
@@ -62,7 +71,7 @@ export const generateMinutes = async (
       },
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.3, // Low temperature for accuracy
+        temperature: 0.3,
       }
     });
 

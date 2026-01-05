@@ -13,10 +13,14 @@ function App() {
   const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.UPLOAD);
   const [file, setFile] = useState<UploadedFile | null>(null);
   
-  // Initialize template from localStorage or use default
+  // Initialize string template from localStorage
   const [template, setTemplate] = useState<string>(() => {
     return localStorage.getItem('minuteMaster_template') || DEFAULT_TEMPLATE;
   });
+
+  // New state for binary template file (PDF/DOCX)
+  // We do NOT save binary files to localStorage to avoid quota limits
+  const [templateFile, setTemplateFile] = useState<UploadedFile | null>(null);
 
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatus>({
     isProcessing: false,
@@ -26,7 +30,7 @@ function App() {
   const [result, setResult] = useState<string>('');
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
 
-  // Save template to localStorage whenever it changes
+  // Save string template to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('minuteMaster_template', template);
   }, [template]);
@@ -40,7 +44,7 @@ function App() {
     if (!file) return;
 
     setCurrentStep(AppStep.PROCESSING);
-    setProcessingStatus({ isProcessing: true, message: 'Đang khởi tạo...', progress: 5 });
+    setProcessingStatus({ isProcessing: true, message: 'Đang phân tích cấu trúc...', progress: 5 });
 
     try {
       const apiKey = process.env.API_KEY; 
@@ -48,8 +52,8 @@ function App() {
         throw new Error("MISSING_API_KEY");
       }
 
-      // Start the generation
-      const minutes = await generateMinutes(file, template, apiKey);
+      // Start the generation, passing both string template and potential file template
+      const minutes = await generateMinutes(file, template, templateFile, apiKey);
       
       setResult(minutes);
       setProcessingStatus({ isProcessing: false, message: 'Hoàn tất!', progress: 100 });
@@ -63,8 +67,6 @@ function App() {
       if (errorMsg === "MISSING_API_KEY") {
         setShowApiKeyModal(true);
         errorMsg = "Thiếu API Key. Vui lòng kiểm tra hướng dẫn cấu hình.";
-        // Stay on the current processing view but show error, or go back? 
-        // Showing the error status is better so they can retry.
       }
 
       setProcessingStatus({
@@ -79,8 +81,7 @@ function App() {
   const handleReset = () => {
     setFile(null);
     setResult('');
-    // Note: We do NOT reset the template to DEFAULT_TEMPLATE here, 
-    // we keep the user's preferred template.
+    setTemplateFile(null); // Reset template file choice
     setProcessingStatus({ isProcessing: false, message: '', progress: 0 });
     setCurrentStep(AppStep.UPLOAD);
   };
@@ -130,7 +131,9 @@ function App() {
               <TemplateSection 
                 uploadedFile={file}
                 template={template}
+                templateFile={templateFile}
                 setTemplate={setTemplate}
+                setTemplateFile={setTemplateFile}
                 onNext={handleStartProcessing}
                 onBack={() => setCurrentStep(AppStep.UPLOAD)}
               />

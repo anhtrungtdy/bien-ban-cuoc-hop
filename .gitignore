@@ -7,8 +7,9 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Node
 node_modules
-dist
+.DS_Store
 dist-ssr
 *.local
 
@@ -16,9 +17,21 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .idea
-.DS_Store
+.kamal
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+# Note: We do NOT ignore 'dist' here because some Python hostings
+# do not support Node.js build steps.
+# If your hosting supports building Node, add 'dist' to this list.
+# dist/
