@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Steps } from './components/Steps';
 import { UploadSection } from './components/UploadSection';
 import { TemplateSection } from './components/TemplateSection';
 import { ProcessingSection } from './components/ProcessingSection';
 import { ResultSection } from './components/ResultSection';
+import { ApiKeyModal } from './components/ApiKeyModal';
 import { AppStep, UploadedFile, DEFAULT_TEMPLATE, ProcessingStatus } from './types';
 import { generateMinutes } from './services/geminiService';
 import { Bot, Info } from 'lucide-react';
@@ -11,13 +12,24 @@ import { Bot, Info } from 'lucide-react';
 function App() {
   const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.UPLOAD);
   const [file, setFile] = useState<UploadedFile | null>(null);
-  const [template, setTemplate] = useState<string>(DEFAULT_TEMPLATE);
+  
+  // Initialize template from localStorage or use default
+  const [template, setTemplate] = useState<string>(() => {
+    return localStorage.getItem('minuteMaster_template') || DEFAULT_TEMPLATE;
+  });
+
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatus>({
     isProcessing: false,
     message: '',
     progress: 0
   });
   const [result, setResult] = useState<string>('');
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+
+  // Save template to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('minuteMaster_template', template);
+  }, [template]);
 
   const handleFileSelected = (selectedFile: UploadedFile) => {
     setFile(selectedFile);
@@ -49,7 +61,10 @@ function App() {
       let errorMsg = error.message || "Không thể xử lý yêu cầu.";
       
       if (errorMsg === "MISSING_API_KEY") {
-        errorMsg = "Lỗi cấu hình Hosting: Không tìm thấy API Key. Hãy đảm bảo bạn đã thiết lập biến môi trường `API_KEY` trên server hoặc platform hosting của mình.";
+        setShowApiKeyModal(true);
+        errorMsg = "Thiếu API Key. Vui lòng kiểm tra hướng dẫn cấu hình.";
+        // Stay on the current processing view but show error, or go back? 
+        // Showing the error status is better so they can retry.
       }
 
       setProcessingStatus({
@@ -64,13 +79,16 @@ function App() {
   const handleReset = () => {
     setFile(null);
     setResult('');
-    setTemplate(DEFAULT_TEMPLATE);
+    // Note: We do NOT reset the template to DEFAULT_TEMPLATE here, 
+    // we keep the user's preferred template.
     setProcessingStatus({ isProcessing: false, message: '', progress: 0 });
     setCurrentStep(AppStep.UPLOAD);
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900">
+      <ApiKeyModal isOpen={showApiKeyModal} onClose={() => setShowApiKeyModal(false)} />
+
       {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">

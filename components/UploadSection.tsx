@@ -45,7 +45,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected }) 
 
     // Basic validation
     const validTypes = [
-      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-m4a',
+      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-m4a', 'audio/x-wav', 'audio/vnd.wav',
       'application/pdf', 
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'text/plain'
@@ -56,7 +56,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected }) 
     const hasValidExt = validExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
 
     if (!validTypes.includes(file.type) && !hasValidExt) {
-      setError("Định dạng file không hỗ trợ. Vui lòng tải lên MP3, PDF, DOCX hoặc Text.");
+      setError("Định dạng file không hỗ trợ. Vui lòng tải lên MP3, WAV, M4A, PDF, DOCX hoặc Text.");
       setIsProcessing(false);
       return;
     }
@@ -85,7 +85,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected }) 
     <div className="w-full max-w-2xl mx-auto">
       <div className="mb-6 text-center">
         <h2 className="text-2xl font-bold text-slate-800 mb-2">Tải lên nội dung cuộc họp</h2>
-        <p className="text-slate-500">Hỗ trợ file ghi âm (MP3), tài liệu (PDF, DOCX) hoặc văn bản thô.</p>
+        <p className="text-slate-500">Hỗ trợ file ghi âm (MP3, WAV, M4A), tài liệu (PDF, DOCX) hoặc văn bản thô.</p>
       </div>
 
       <div 
@@ -120,7 +120,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected }) 
             <p className="text-sm text-slate-500 mb-6">hoặc click để chọn file từ máy tính</p>
             
             <div className="flex space-x-4 text-xs text-slate-400">
-              <span className="flex items-center"><FileAudio size={14} className="mr-1" /> MP3/WAV</span>
+              <span className="flex items-center"><FileAudio size={14} className="mr-1" /> MP3/WAV/M4A</span>
               <span className="flex items-center"><FileIcon size={14} className="mr-1" /> PDF/DOCX</span>
               <span className="flex items-center"><FileText size={14} className="mr-1" /> TXT</span>
             </div>

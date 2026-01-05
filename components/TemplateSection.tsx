@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UploadedFile, FileType } from '../types';
-import { FileText, FileAudio, RotateCcw, ArrowRight, ArrowLeft } from 'lucide-react';
+import { FileText, FileAudio, RotateCcw, ArrowRight, ArrowLeft, Upload } from 'lucide-react';
 import { formatFileSize } from '../utils/fileHelpers';
 
 interface TemplateSectionProps {
@@ -27,6 +27,21 @@ export const TemplateSection: React.FC<TemplateSectionProps> = ({
   const handleTemplateChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setLocalTemplate(e.target.value);
     setTemplate(e.target.value);
+  };
+
+  const handleTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          const content = event.target.result as string;
+          setTemplate(content);
+          setLocalTemplate(content);
+        }
+      };
+      reader.readAsText(file);
+    }
   };
 
   const getFileIcon = () => {
@@ -79,7 +94,14 @@ export const TemplateSection: React.FC<TemplateSectionProps> = ({
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col flex-grow h-[500px]">
           <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
             <h3 className="font-semibold text-slate-800">Cấu hình Biên Bản (Template)</h3>
-            <span className="text-xs text-slate-400">Markdown supported</span>
+            <div className="flex items-center space-x-3">
+              <label className="cursor-pointer flex items-center px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors">
+                <Upload size={14} className="mr-1.5" />
+                Tải mẫu lên
+                <input type="file" className="hidden" accept=".txt,.md" onChange={handleTemplateUpload} />
+              </label>
+              <span className="text-xs text-slate-400 hidden sm:inline">Markdown supported</span>
+            </div>
           </div>
           <textarea
             value={localTemplate}
