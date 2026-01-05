@@ -25,7 +25,9 @@ export const generateMinutes = async (
   if (!apiKey) throw new Error("API Key is missing");
 
   const ai = new GoogleGenAI({ apiKey });
-  const modelName = 'gemini-2.5-flash-latest';
+  // Using gemini-2.0-flash-exp for better multimodal support (Audio, PDF)
+  // Or gemini-flash-latest as a fallback safe alias
+  const modelName = 'gemini-2.0-flash-exp';
 
   try {
     const parts: any[] = [];
@@ -47,16 +49,23 @@ export const generateMinutes = async (
 
     // --- PART 2: TEMPLATE ---
     if (templateFile) {
-      // If user uploaded a binary template (PDF/DOCX)
-      parts.push({
-        inlineData: {
-          mimeType: templateFile.mimeType,
-          data: templateFile.data
-        }
-      });
-      parts.push({ 
-        text: "Đây là FILE MẪU (Template). Hãy phân tích cấu trúc, bảng biểu và cách trình bày của file này. Tạo ra biên bản cuộc họp có nội dung lấy từ dữ liệu nguồn, nhưng hình thức trình bày (Markdown) phải KHỚP với file mẫu này." 
-      });
+      if (templateFile.type === FileType.TEXT) {
+         // If template was a DOCX converted to TEXT or plain TXT
+         parts.push({
+            text: `\n\n--- FILE MẪU (Template Structure) ---\n${templateFile.data}\n--- HẾT FILE MẪU ---\n\nHãy sử dụng cấu trúc văn bản trên làm mẫu định dạng.`
+         });
+      } else {
+         // If user uploaded a binary template (PDF)
+         parts.push({
+            inlineData: {
+            mimeType: templateFile.mimeType,
+            data: templateFile.data
+            }
+         });
+         parts.push({ 
+            text: "Đây là FILE MẪU (Template). Hãy phân tích cấu trúc, bảng biểu và cách trình bày của file này. Tạo ra biên bản cuộc họp có nội dung lấy từ dữ liệu nguồn, nhưng hình thức trình bày (Markdown) phải KHỚP với file mẫu này." 
+         });
+      }
     } else {
       // Use text template
       parts.push({
@@ -75,16 +84,27 @@ export const generateMinutes = async (
       }
     });
 
-    return response.text || "Không thể tạo nội dung. Vui lòng thử lại.";
+    if (!response.text) {
+        throw new Error("AI không trả về nội dung nào.");
+    }
+
+    return response.text;
 
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     let errorMessage = "Đã xảy ra lỗi khi gọi Gemini API.";
     
+    // More specific error handling
     if (error.message?.includes('413')) {
       errorMessage = "File quá lớn so với giới hạn của API hiện tại. Vui lòng thử file nhỏ hơn hoặc cắt ngắn bớt.";
     } else if (error.message?.includes('400')) {
-      errorMessage = "Dữ liệu đầu vào không hợp lệ hoặc định dạng file bị lỗi.";
+      errorMessage = "Dữ liệu đầu vào không hợp lệ hoặc định dạng file bị lỗi. (Lỗi 400)";
+    } else if (error.message?.includes('403') || error.message?.includes('401')) {
+       errorMessage = "Lỗi xác thực API Key. Key có thể không hợp lệ hoặc hết hạn.";
+    } else if (error.message?.includes('404')) {
+       errorMessage = `Model '${modelName}' không tìm thấy hoặc không khả dụng với Key này.`;
+    } else if (error.message?.includes('503')) {
+       errorMessage = "Server đang bận (503). Vui lòng thử lại sau giây lát.";
     }
 
     throw new Error(errorMessage);

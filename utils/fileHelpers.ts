@@ -1,4 +1,5 @@
 import { FileType, UploadedFile } from '../types';
+import mammoth from 'mammoth';
 
 export const getFileType = (file: File): FileType => {
   const name = file.name.toLowerCase();
@@ -29,8 +30,6 @@ export const readFileAsBase64 = (file: File): Promise<string> => {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
-      // Remove Data URI prefix (e.g., "data:audio/mp3;base64,")
-      // Some browsers/files might have different headers, split by comma is safest
       const base64 = result.split(',')[1];
       resolve(base64);
     };
@@ -48,22 +47,45 @@ export const readFileAsText = (file: File): Promise<string> => {
   });
 };
 
+export const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = (error) => reject(error);
+    reader.readAsArrayBuffer(file);
+  });
+};
+
 export const processUploadedFile = async (file: File): Promise<UploadedFile> => {
   const type = getFileType(file);
   let data = '';
+  let finalType = type;
+  let mimeType = file.type || 'application/octet-stream';
 
-  // Only read as text if it is explicitly a text file type. 
-  // PDFs and DOCX should always be Base64 for Gemini.
   if (type === FileType.TEXT) {
     data = await readFileAsText(file);
+  } else if (type === FileType.DOCX) {
+    // Convert DOCX to Raw Text because Gemini API doesn't support DOCX inlineData directly
+    try {
+      const arrayBuffer = await readFileAsArrayBuffer(file);
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      data = result.value;
+      // We treat the processed DOCX as TEXT for the AI
+      finalType = FileType.TEXT; 
+      mimeType = 'text/plain';
+    } catch (error) {
+      console.error("Error parsing DOCX:", error);
+      throw new Error("Không thể đọc file DOCX. Vui lòng thử lại hoặc chuyển sang PDF.");
+    }
   } else {
+    // Audio, PDF
     data = await readFileAsBase64(file);
   }
 
   return {
     name: file.name,
-    type,
-    mimeType: file.type || 'application/octet-stream',
+    type: finalType,
+    mimeType: mimeType,
     data,
     size: file.size
   };

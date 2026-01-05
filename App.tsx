@@ -40,6 +40,18 @@ function App() {
     setCurrentStep(AppStep.TEMPLATE);
   };
 
+  const getApiKey = () => {
+    const envKey = process.env.API_KEY;
+    if (!envKey) return null;
+    
+    // Support multiple keys separated by comma for load balancing/rotation
+    const keys = envKey.split(',').map(k => k.trim()).filter(k => k);
+    if (keys.length === 0) return null;
+    
+    // Pick a random key from the pool
+    return keys[Math.floor(Math.random() * keys.length)];
+  };
+
   const handleStartProcessing = async () => {
     if (!file) return;
 
@@ -47,7 +59,7 @@ function App() {
     setProcessingStatus({ isProcessing: true, message: 'Đang phân tích cấu trúc...', progress: 5 });
 
     try {
-      const apiKey = process.env.API_KEY; 
+      const apiKey = getApiKey(); 
       if (!apiKey) {
         throw new Error("MISSING_API_KEY");
       }
