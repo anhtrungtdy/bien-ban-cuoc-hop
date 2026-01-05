@@ -1,0 +1,5 @@
+{
+  "name": "MinuteMaster AI",
+  "description": "Transform meeting recordings (MP3), PDFs, DOCX, or text into professional meeting minutes using custom templates.",
+  "requestFramePermissions": []
+}
