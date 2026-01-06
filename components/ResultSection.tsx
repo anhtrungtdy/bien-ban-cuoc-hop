@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Download, Copy, Check, RotateCcw, FileText, FileType2, Type, Minus, Plus, FileSignature, Eye, PenLine, Share2 } from 'lucide-react';
+import { Download, Copy, Check, RotateCcw, FileText, FileType2, Type, Minus, Plus, FileSignature, Eye, PenLine, Share2, Upload, AlertCircle, X, File as FileIcon } from 'lucide-react';
 // @ts-ignore
 import html2pdf from 'html2pdf.js';
 import Docxtemplater from 'docxtemplater';
@@ -22,14 +22,16 @@ const FONTS = [
 ];
 
 export const ResultSection: React.FC<ResultSectionProps> = ({ result, templateFileRaw, onReset }) => {
-  const [copied, setCopied] = useState(false);
-  const [selectedFont, setSelectedFont] = useState(FONTS[0].value);
   const [fontSize, setFontSize] = useState(14); 
-  const contentRef = useRef<HTMLDivElement>(null);
+  const [selectedFont, setSelectedFont] = useState(FONTS[0].value);
   
   // State for Fill Mode
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [isPreviewMode, setIsPreviewMode] = useState(true);
+
+  // Fallback Template State
+  const [showMissingTemplateDialog, setShowMissingTemplateDialog] = useState(false);
+  const [manualTemplateFile, setManualTemplateFile] = useState<File | null>(null);
 
   useEffect(() => {
     if (result.mode === ProcessingMode.FILL_TEMPLATE && result.jsonData) {
@@ -41,28 +43,54 @@ export const ResultSection: React.FC<ResultSectionProps> = ({ result, templateFi
     setFormData(prev => ({ ...prev, [key]: value }));
   };
 
+  const handleManualUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+        setManualTemplateFile(e.target.files[0]);
+    }
+  };
+
   const handleDownloadDocxFilled = async () => {
-    if (!templateFileRaw) return alert("Không tìm thấy file mẫu gốc.");
+    const fileToUse = manualTemplateFile || templateFileRaw;
+
+    if (!fileToUse) {
+        setShowMissingTemplateDialog(true);
+        return;
+    }
+
     try {
       const reader = new FileReader();
-      reader.readAsBinaryString(templateFileRaw);
+      reader.readAsBinaryString(fileToUse);
       reader.onload = (e) => {
         const content = e.target?.result;
         if (typeof content !== 'string') return;
-        const zip = new PizZip(content);
-        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, parser: (tag: string) => ({ get: (scope: any) => scope[tag] || scope[tag.trim()] }) });
-        doc.render(formData);
-        const out = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
-        const url = URL.createObjectURL(out);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `Bien_Ban_${new Date().toISOString().slice(0, 10)}.docx`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        
+        try {
+            const zip = new PizZip(content);
+            const doc = new Docxtemplater(zip, { 
+                paragraphLoop: true, 
+                linebreaks: true, 
+                parser: (tag: string) => ({ get: (scope: any) => scope[tag] || scope[tag.trim()] }) 
+            });
+            
+            doc.render(formData);
+            
+            const out = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+            const url = URL.createObjectURL(out);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `Bien_Ban_${new Date().toISOString().slice(0, 10)}.docx`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            setShowMissingTemplateDialog(false);
+        } catch (renderError) {
+            console.error(renderError);
+            alert("Lỗi khi điền dữ liệu vào file mẫu. Vui lòng kiểm tra lại file mẫu.");
+        }
       };
     } catch (error) {
-      alert("Lỗi khi tạo file Word.");
+      alert("Lỗi đọc file mẫu.");
     }
   };
 
@@ -90,33 +118,104 @@ export const ResultSection: React.FC<ResultSectionProps> = ({ result, templateFi
 
   if (result.mode === ProcessingMode.FILL_TEMPLATE) {
     return (
-      <div className="w-full max-w-4xl mx-auto pb-32">
-        {/* Floating Toggle & Reset */}
-        <div className="flex justify-between items-center mb-4 sticky top-0 bg-slate-50 py-2 z-20">
-           <button onClick={onReset} className="text-slate-500 bg-white p-2 rounded-full shadow-sm border border-slate-200">
-              <RotateCcw size={18} />
-           </button>
-           <div className="flex bg-white p-1 rounded-full shadow-sm border border-slate-200">
-               <button onClick={() => setIsPreviewMode(false)} className={`p-2 rounded-full transition-all ${!isPreviewMode ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400'}`}><PenLine size={18}/></button>
-               <button onClick={() => setIsPreviewMode(true)} className={`p-2 rounded-full transition-all ${isPreviewMode ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400'}`}><Eye size={18}/></button>
-           </div>
+      <div className="w-full max-w-4xl mx-auto pb-32 relative">
+        {/* Missing Template Dialog */}
+        {showMissingTemplateDialog && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+                <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm p-6">
+                    <div className="flex flex-col items-center text-center mb-6">
+                        <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4">
+                            <AlertCircle size={32} />
+                        </div>
+                        <h3 className="text-xl font-bold text-slate-900">Thiếu File Mẫu</h3>
+                        <p className="text-sm text-slate-500 mt-2 px-2">
+                           Vui lòng tải lên file Word (.docx) để xuất biên bản.
+                        </p>
+                    </div>
+
+                    <div className="mb-6">
+                        <label className={`
+                            flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors
+                            ${manualTemplateFile ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300 hover:border-indigo-400 bg-slate-50'}
+                        `}>
+                            <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                {manualTemplateFile ? (
+                                    <>
+                                        <FileIcon className="w-8 h-8 text-indigo-600 mb-2" />
+                                        <p className="text-sm font-medium text-indigo-900">{manualTemplateFile.name}</p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Upload className="w-8 h-8 text-slate-400 mb-2" />
+                                        <p className="text-sm text-slate-500 font-medium">Chọn file .docx</p>
+                                    </>
+                                )}
+                            </div>
+                            <input type="file" className="hidden" accept=".docx" onChange={handleManualUpload} />
+                        </label>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                        <button 
+                            onClick={handleDownloadDocxFilled}
+                            disabled={!manualTemplateFile}
+                            className="w-full h-12 bg-indigo-600 disabled:bg-slate-300 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors"
+                        >
+                            Xác nhận & Tải về
+                        </button>
+                         <button 
+                            onClick={() => setShowMissingTemplateDialog(false)}
+                            className="w-full h-12 text-slate-500 font-medium hover:bg-slate-100 rounded-xl"
+                        >
+                            Hủy
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* Toolbar */}
+        <div className="sticky top-0 z-30 bg-slate-50/95 backdrop-blur-sm py-2 mb-4 -mx-4 px-4 border-b border-slate-200/50 flex justify-between items-center">
+            <button onClick={onReset} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 text-slate-500 rounded-full shadow-sm hover:text-red-500 active:scale-95 transition-all">
+                <RotateCcw size={18} />
+            </button>
+
+            {/* Segmented Control */}
+            <div className="bg-slate-200/80 p-1 rounded-full flex relative">
+                <button 
+                    onClick={() => setIsPreviewMode(false)}
+                    className={`relative z-10 px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 flex items-center ${!isPreviewMode ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    <PenLine size={14} className="mr-1.5"/> Sửa
+                </button>
+                <button 
+                    onClick={() => setIsPreviewMode(true)}
+                    className={`relative z-10 px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 flex items-center ${isPreviewMode ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    <Eye size={14} className="mr-1.5"/> Xem
+                </button>
+            </div>
         </div>
 
-        <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden min-h-[60vh]">
+        <div className="bg-white rounded-[1.5rem] shadow-sm border border-slate-100 overflow-hidden min-h-[60vh] pb-8">
             {isPreviewMode ? (
                 <div className="animate-in fade-in duration-300">
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 border-b border-blue-100 flex items-center justify-between">
-                         <h3 className="font-bold text-indigo-900 flex items-center"><FileSignature size={18} className="mr-2"/> Xem trước</h3>
-                         <div className="flex items-center space-x-1 bg-white/50 rounded-lg p-1">
-                             <button onClick={() => setFontSize(s => Math.max(10, s-1))} className="p-1"><Minus size={14}/></button>
-                             <span className="text-xs font-mono w-4 text-center">{fontSize}</span>
-                             <button onClick={() => setFontSize(s => Math.min(24, s+1))} className="p-1"><Plus size={14}/></button>
+                    <div className="bg-slate-50 p-4 border-b border-slate-100 flex items-center justify-between">
+                         <div className="flex items-center space-x-2">
+                             <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                             <span className="w-2 h-2 rounded-full bg-yellow-400"></span>
+                             <span className="w-2 h-2 rounded-full bg-green-400"></span>
+                         </div>
+                         <div className="flex items-center space-x-1 bg-white border border-slate-200 rounded-lg p-1">
+                             <button onClick={() => setFontSize(s => Math.max(10, s-1))} className="p-1 hover:bg-slate-100 rounded"><Minus size={14}/></button>
+                             <span className="text-xs font-mono w-6 text-center">{fontSize}</span>
+                             <button onClick={() => setFontSize(s => Math.min(24, s+1))} className="p-1 hover:bg-slate-100 rounded"><Plus size={14}/></button>
                          </div>
                     </div>
-                    <div className="p-4 md:p-8 space-y-8">
+                    <div className="p-5 md:p-10 space-y-8">
                         {Object.keys(formData).map((key) => (
                             <div key={key}>
-                                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-100 pb-1">{key.replace(/_/g, ' ')}</div>
+                                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 pb-1 border-b border-dashed border-slate-200">{key.replace(/_/g, ' ')}</div>
                                 <div className="text-slate-900">
                                     {key === 'noi_dung_cuoc_hop' 
                                         ? <div style={{fontSize: `${fontSize}px`}}>{renderScientificPreview(formData[key])}</div>
@@ -128,15 +227,15 @@ export const ResultSection: React.FC<ResultSectionProps> = ({ result, templateFi
                     </div>
                 </div>
             ) : (
-                <div className="p-4 space-y-6 animate-in fade-in duration-300">
+                <div className="p-5 space-y-6 animate-in fade-in duration-300">
                     {Object.keys(formData).map((key) => (
                         <div key={key}>
-                            <label className="block text-xs font-bold text-indigo-500 uppercase tracking-wider mb-2 bg-indigo-50 inline-block px-2 py-1 rounded">{key}</label>
+                            <label className="block text-xs font-bold text-indigo-500 uppercase tracking-wider mb-2 bg-indigo-50 inline-block px-2 py-1 rounded-md">{key}</label>
                             <textarea 
                                 value={formData[key]} 
                                 onChange={(e) => handleInputChange(key, e.target.value)}
                                 rows={Math.max(3, formData[key]?.split('\n').length || 3)}
-                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 text-base leading-relaxed"
+                                className="w-full p-4 bg-slate-50 border-none rounded-2xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 text-base leading-relaxed transition-all"
                                 placeholder={`Nhập nội dung...`}
                                 style={{fontFamily: selectedFont}}
                             />
@@ -146,13 +245,13 @@ export const ResultSection: React.FC<ResultSectionProps> = ({ result, templateFi
             )}
         </div>
         
-        {/* Bottom Floating Action Button (FAB) */}
-        <div className="fixed bottom-6 right-6 z-50">
+        {/* Floating Action Button (FAB) */}
+        <div className="fixed bottom-6 right-6 z-40">
              <button 
                 onClick={handleDownloadDocxFilled}
-                className="h-14 px-6 bg-indigo-600 active:bg-indigo-700 text-white rounded-full shadow-xl shadow-indigo-300 flex items-center justify-center font-bold transition-transform active:scale-95"
+                className="h-16 px-8 bg-indigo-600 active:bg-indigo-700 text-white rounded-full shadow-xl shadow-indigo-300/50 flex items-center justify-center font-bold text-lg transition-transform active:scale-95 hover:scale-105"
             >
-                <Download size={20} className="mr-2" /> Tải về
+                <Download size={24} className="mr-2.5" /> Tải về
             </button>
         </div>
       </div>

@@ -1,45 +1,117 @@
-# MinuteMaster AI
+# MinuteMaster AI - Hướng dẫn Triển khai (Deployment)
 
-Ứng dụng tạo biên bản cuộc họp tự động sử dụng Google Gemini AI, hỗ trợ MP3, PDF, DOCX.
+Ứng dụng này được thiết kế để chạy trên môi trường Hybrid (Kết hợp):
+- **Frontend**: ReactJS (được build bằng Node.js/Vite).
+- **Backend**: Python Flask (để phục vụ file tĩnh và làm web server).
 
-## 🚀 Hướng Dẫn Cài Đặt Lên Hosting (Hỗ trợ Python)
+Dưới đây là hướng dẫn chi tiết để đưa ứng dụng lên các Hosting phổ biến (Render, Railway, Heroku) hoặc VPS.
 
-Dự án này bao gồm Frontend (React/Vite) và một Backend Python (Flask) nhẹ để phục vụ file tĩnh.
+---
 
-### Cách 1: Hosting có hỗ trợ cả Node.js và Python (Ví dụ: Render, Railway, Heroku)
+## 1. Chuẩn bị trước khi Upload
 
-1.  Push code lên GitHub.
-2.  Kết nối Repo với Hosting.
-3.  Cấu hình **Build Command**: `npm install && npm run build` (để tạo thư mục `dist`).
-4.  Cấu hình **Start Command**: `gunicorn main:app` (để chạy Python server).
-5.  **Quan trọng:** Cài đặt Biến môi trường (Environment Variable) `API_KEY` trong phần cài đặt của Hosting với giá trị là key từ Google AI Studio.
+Đảm bảo cấu trúc file của bạn có đầy đủ các file sau ở thư mục gốc:
+- `main.py`: File khởi chạy server Python.
+- `package.json`: Quản lý thư viện JS và lệnh build.
+- `requirements.txt`: Quản lý thư viện Python.
+- `vite.config.ts`: Cấu hình build frontend.
 
-### Cách 2: Hosting chỉ hỗ trợ Python (cPanel, PythonAnywhere, VPS thuần)
+---
 
-Vì hosting không có Node.js để build code React, bạn cần build thủ công trên máy tính cá nhân trước.
+## 2. Triển khai lên Hosting (Khuyên dùng: Render.com)
 
-1.  **Trên máy tính của bạn:**
-    *   Cài đặt Node.js.
-    *   Chạy lệnh: `npm install`
-    *   Chạy lệnh: `npm run build`
-    *   Lệnh trên sẽ tạo ra thư mục `dist`.
-2.  **Push lên GitHub:**
-    *   Đảm bảo thư mục `dist` **được commit và push** lên GitHub (File `.gitignore` trong dự án này đã cho phép đẩy folder `dist`).
-3.  **Trên Hosting:**
-    *   Kết nối GitHub hoặc upload code.
-    *   Cài đặt các gói Python từ `requirements.txt`.
-    *   Cấu hình Entry point (file khởi động) là `main.py` (hoặc `main:app` nếu dùng Passenger/WSGI).
-    *   Thiết lập biến môi trường `API_KEY`.
+Render là nền tảng miễn phí/giá rẻ hỗ trợ rất tốt cho dạng ứng dụng này.
 
-## 🛠 Cấu Trúc Dự Án
+### Bước 1: Đẩy code lên GitHub
+Tạo một repository trên GitHub và push toàn bộ code của bạn lên đó.
 
-*   `src/`: Mã nguồn React (Frontend).
-*   `dist/`: Mã nguồn đã được biên dịch (HTML/CSS/JS) để chạy trên Production.
-*   `main.py`: Web Server Python (Flask) để phục vụ thư mục `dist`.
-*   `requirements.txt`: Thư viện Python cần thiết.
+### Bước 2: Tạo Web Service trên Render
+1. Truy cập [dashboard.render.com](https://dashboard.render.com/).
+2. Chọn **New +** -> **Web Service**.
+3. Kết nối với repository GitHub của bạn.
 
-## 🔑 Biến Môi Trường (Environment Variables)
+### Bước 3: Cấu hình Build & Run
+Điền các thông số sau (Rất quan trọng):
 
-Ứng dụng bắt buộc phải có biến môi trường sau để hoạt động:
+- **Name**: `minutemaster-ai` (hoặc tùy ý).
+- **Environment**: `Python 3` (Chọn Python vì đây là môi trường chạy chính).
+- **Build Command**: 
+  ```bash
+  npm install && npm run build && pip install -r requirements.txt
+  ```
+  *(Giải thích: Lệnh này sẽ cài Node modules -> Build React ra thư mục `dist` -> Cài thư viện Python)*.
+  
+- **Start Command**: 
+  ```bash
+  gunicorn main:app
+  ```
+  *(Giải thích: Dùng Gunicorn để chạy file `main.py` chuyên nghiệp hơn chạy trực tiếp python)*.
 
-*   `API_KEY`: API Key lấy từ [Google AI Studio](https://aistudio.google.com/).
+### Bước 4: Cấu hình API Key (Bảo mật)
+1. Cuộn xuống phần **Environment Variables**.
+2. Nhấn **Add Environment Variable**.
+3. Key: `API_KEY`
+4. Value: `Paste_Key_Cua_Ban_Vao_Day` (Nên dùng key riêng lấy từ [Google AI Studio](https://aistudio.google.com/)).
+   *Nếu không điền, ứng dụng sẽ dùng danh sách key dùng chung mặc định (dễ bị hết quota).*
+
+### Bước 5: Deploy
+Nhấn **Create Web Service**. Chờ khoảng 3-5 phút để hệ thống build và start server.
+
+---
+
+## 3. Triển khai lên VPS (Ubuntu/CentOS)
+
+Nếu bạn dùng VPS riêng, hãy làm theo các bước sau:
+
+### Cài đặt môi trường
+```bash
+# Cài Node.js (v18+)
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Cài Python và pip
+sudo apt-get install python3 python3-pip python3-venv
+```
+
+### Build ứng dụng
+```bash
+# Clone code về
+git clone <link-repo-cua-ban>
+cd minutemaster-ai
+
+# Build Frontend
+npm install
+npm run build
+
+# Setup Backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Chạy Server
+```bash
+# Chạy thử
+export API_KEY="your_api_key_here"
+gunicorn --bind 0.0.0.0:80 main:app
+```
+*(Để chạy lâu dài, hãy dùng Nginx và Supervisor/Systemd)*.
+
+---
+
+## 4. Troubleshooting (Sửa lỗi thường gặp)
+
+**Lỗi: "Internal Server Error" hoặc App không hiện lên**
+- Kiểm tra xem thư mục `dist` có được tạo ra không? (Xem log phần Build).
+- Kiểm tra `Start Command` có đúng là `gunicorn main:app` không.
+
+**Lỗi: AI không trả lời (Lỗi 500/400)**
+- Kiểm tra `API_KEY` trong Environment Variables.
+- Đảm bảo Google AI Studio Key của bạn còn hạn mức (Quota).
+
+**Lỗi: Không tải được file mẫu**
+- Đảm bảo server có quyền truy cập internet để tải file từ URL bên ngoài.
+
+---
+
+© 2024 MinuteMaster AI
